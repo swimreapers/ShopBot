@@ -401,63 +401,62 @@ class SRVehicleHub(commands.Cog):
                 if model in set(owned.get(steam_id, [])):
                     raise ValueError("already_owned")
 
-            old_total = sum(points.get(steam_id, 0) for _, _, points in points_files)
-            if old_total < price:
+            balances_by_file: List[Tuple[str, Any, int]] = []
+            old_total = 0
+            for path, raw, points in points_files:
+                balance = int(points.get(steam_id, 0))
+                balances_by_file.append((path, raw, balance))
+                old_total += balance
+
+            # Same total-balance logic as balance/profile display.
+            if old_total < int(price):
                 raise ValueError("insufficient_funds")
 
-            remaining = price
+            remaining = int(price)
             updated_point_files: List[Tuple[str, Any]] = []
 
-            # Deduct from the first file with enough balance if possible, otherwise spread across files.
-            enough_single = None
-            for i, (path, raw, points) in enumerate(points_files):
-                balance = points.get(steam_id, 0)
-                if balance >= price:
-                    enough_single = i
-                    break
-
-            if enough_single is not None:
-                path, raw, points = points_files[enough_single]
-                new_balance = points.get(steam_id, 0) - price
-                updated_point_files.append((path, self._set_points_balance(raw, steam_id, new_balance)))
+            single_cover_index = next((i for i, (_, _, balance) in enumerate(balances_by_file) if balance >= remaining), None)
+            if single_cover_index is not None:
+                path, raw, balance = balances_by_file[single_cover_index]
+                updated_point_files.append((path, self._set_points_balance(raw, steam_id, balance - remaining)))
+                remaining = 0
             else:
-                for path, raw, points in points_files:
+                for path, raw, balance in balances_by_file:
                     if remaining <= 0:
                         break
-                    balance = points.get(steam_id, 0)
                     if balance <= 0:
                         continue
                     take = min(balance, remaining)
-                    remaining -= take
                     updated_point_files.append((path, self._set_points_balance(raw, steam_id, balance - take)))
+                    remaining -= take
 
-            if remaining > 0:
-                raise ValueError("insufficient_funds")
+            if remaining != 0:
+                raise RuntimeError(f"Purchase deduction mismatch. remaining={remaining}, old_total={old_total}, price={price}")
 
             updated_owned_files: List[Tuple[str, Any]] = []
             for path, raw, _ in owned_files:
                 updated_owned_files.append((path, self._add_owned_vehicle(raw, steam_id, model)))
 
-            # Write after all validations succeed.
+            # Write only after all validations succeed.
             for path, raw in updated_point_files:
                 await self._write_json_atomic(path, raw)
 
             for path, raw in updated_owned_files:
                 await self._write_json_atomic(path, raw)
 
-            new_total = old_total - price
+            new_total = old_total - int(price)
             return old_total, new_total, [path for path, _ in updated_owned_files]
 
     # -------------------------
     # Commands
     # -------------------------
 
-    @commands.group(name="srhub")
-    async def srhub(self, ctx: commands.Context):
+    @commands.group(name="reap")
+    async def reap(self, ctx: commands.Context):
         """Swim Reapers vehicle shop hub."""
         pass
 
-    @srhub.group(name="config")
+    @reap.group(name="config")
     @checks.admin_or_permissions(manage_guild=True)
     async def config_group(self, ctx: commands.Context):
         """Configure SRVehicleHub."""
@@ -531,7 +530,7 @@ class SRVehicleHub(commands.Cog):
         await self.config.guild(ctx.guild).purchase_dm_receipt.set(enabled)
         await ctx.tick()
 
-    @srhub.command(name="paths")
+    @reap.command(name="paths")
     @checks.admin_or_permissions(manage_guild=True)
     async def paths(self, ctx: commands.Context):
         """Show configured file paths."""
@@ -545,7 +544,7 @@ class SRVehicleHub(commands.Cog):
         embed.add_field(name="Self-link", value=str(cfg["allow_self_link"]), inline=True)
         await ctx.send(embed=embed)
 
-    @srhub.command(name="status")
+    @reap.command(name="status")
     @checks.admin_or_permissions(manage_guild=True)
     async def status(self, ctx: commands.Context):
         """Check configured files and parsed counts."""
@@ -582,7 +581,7 @@ class SRVehicleHub(commands.Cog):
         for chunk in self._chunk_lines(lines):
             await ctx.send(chunk)
 
-    @srhub.command(name="link")
+    @reap.command(name="link")
     async def link(self, ctx: commands.Context, steam_id: str):
         """Link your Discord account to your SteamID64."""
         cfg = await self.config.guild(ctx.guild).all()
@@ -598,7 +597,7 @@ class SRVehicleHub(commands.Cog):
         await self.config.user(ctx.author).steam_id.set(steam_id)
         await ctx.send(f"{ctx.author.mention}, linked to SteamID `{steam_id}`.")
 
-    @srhub.command(name="linkuser")
+    @reap.command(name="linkuser")
     @checks.admin_or_permissions(manage_guild=True)
     async def linkuser(self, ctx: commands.Context, member: discord.Member, steam_id: str):
         """Staff command: link a Discord member to a SteamID64."""
@@ -609,21 +608,21 @@ class SRVehicleHub(commands.Cog):
         await self.config.user(member).steam_id.set(steam_id)
         await ctx.send(f"Linked {member.mention} to SteamID `{steam_id}`.")
 
-    @srhub.command(name="unlink")
+    @reap.command(name="unlink")
     async def unlink(self, ctx: commands.Context):
         """Unlink your SteamID."""
         await self.config.user(ctx.author).steam_id.set("")
         await ctx.tick()
 
-    @srhub.command(name="mysteam")
+    @reap.command(name="mysteam")
     async def mysteam(self, ctx: commands.Context):
         """Show your linked SteamID."""
         steam_id = await self._get_linked_steam_id(ctx.author)
         if not steam_id:
-            return await ctx.send("You do not have a SteamID linked. Use `[p]srhub link <SteamID64>`.")
+            return await ctx.send("You do not have a SteamID linked. Use `[p]reap link <SteamID64>`.")
         await ctx.send(f"{ctx.author.mention}, your linked SteamID is `{steam_id}`.")
 
-    @srhub.command(name="balance")
+    @reap.command(name="balance")
     async def balance(self, ctx: commands.Context, member: Optional[discord.Member] = None):
         """Show your delivery balance, or another member's if staff."""
         target = member or ctx.author
@@ -646,7 +645,7 @@ class SRVehicleHub(commands.Cog):
 
         await ctx.send(f"{target.mention} balance: **{self._format_money(total, cfg['currency_name'])}**")
 
-    @srhub.command(name="garage")
+    @reap.command(name="garage")
     async def garage(self, ctx: commands.Context, member: Optional[discord.Member] = None):
         """Show owned vehicles."""
         target = member or ctx.author
@@ -679,7 +678,7 @@ class SRVehicleHub(commands.Cog):
         for chunk in self._chunk_lines(lines):
             await ctx.send(chunk)
 
-    @srhub.command(name="profile")
+    @reap.command(name="profile")
     async def profile(self, ctx: commands.Context, member: Optional[discord.Member] = None):
         """Show linked SteamID, balance, and garage summary."""
         target = member or ctx.author
@@ -724,7 +723,7 @@ class SRVehicleHub(commands.Cog):
 
         await ctx.send(embed=embed)
 
-    @srhub.command(name="shop")
+    @reap.command(name="shop")
     async def shop(self, ctx: commands.Context, *, search: Optional[str] = None):
         """Show vehicle shop, optionally filtered by search text."""
         cfg = await self.config.guild(ctx.guild).all()
@@ -754,12 +753,12 @@ class SRVehicleHub(commands.Cog):
         for chunk in self._chunk_lines(lines[:100]):
             await ctx.send(chunk)
 
-    @srhub.command(name="buy")
+    @reap.command(name="buy")
     async def buy(self, ctx: commands.Context, *, car: str):
         """Buy a vehicle from vehicle_shop.json with your DeliveryPlugin points."""
         steam_id = await self._get_linked_steam_id(ctx.author)
         if not steam_id:
-            return await ctx.send("You need to link your SteamID first: `[p]srhub link <SteamID64>`")
+            return await ctx.send("You need to link your SteamID first: `[p]reap link <SteamID64>`")
 
         cfg = await self.config.guild(ctx.guild).all()
 
@@ -770,7 +769,7 @@ class SRVehicleHub(commands.Cog):
 
         found = self._find_shop_item(shop, car)
         if found is None:
-            return await ctx.send("I could not find a unique matching vehicle. Use `[p]srhub shop <search>` and buy by exact model if needed.")
+            return await ctx.send("I could not find a unique matching vehicle. Use `[p]reap shop <search>` and buy by exact model if needed.")
 
         model, item = found
         display = str(item.get("display_name", model))
@@ -787,15 +786,20 @@ class SRVehicleHub(commands.Cog):
             if str(ex) == "insufficient_funds":
                 # Get current balance for useful reply.
                 total = 0
+                file_lines = []
                 try:
                     for path in cfg["delivery_points_paths"]:
-                        total += self._extract_points(await self._read_json(path)).get(steam_id, 0)
+                        file_balance = int(self._extract_points(await self._read_json(path)).get(steam_id, 0))
+                        total += file_balance
+                        file_lines.append(f"`{Path(path).name}`={self._format_money(file_balance, cfg['currency_name'])}")
                 except Exception:
                     pass
+
+                detail = f" ({', '.join(file_lines)})" if file_lines else ""
                 return await ctx.send(
                     f"{ctx.author.mention}, you do not have enough delivery points for **{display}**. "
                     f"Price: **{self._format_money(price, cfg['currency_name'])}**. "
-                    f"Balance: **{self._format_money(total, cfg['currency_name'])}**."
+                    f"Balance: **{self._format_money(total, cfg['currency_name'])}**{detail}."
                 )
             return await ctx.send(f"Purchase failed: `{ex}`")
         except Exception as ex:
@@ -816,7 +820,7 @@ class SRVehicleHub(commands.Cog):
             except discord.HTTPException:
                 pass
 
-    @srhub.command(name="grantcar")
+    @reap.command(name="grantcar")
     @checks.admin_or_permissions(manage_guild=True)
     async def grantcar(self, ctx: commands.Context, member: discord.Member, *, car: str):
         """Staff: grant a vehicle without charging points."""
@@ -841,7 +845,7 @@ class SRVehicleHub(commands.Cog):
 
         await ctx.send(f"Granted **{display}** (`{model}`) to {member.mention} on {len(cfg['owned_vehicles_paths'])} server file(s).")
 
-    @srhub.command(name="top")
+    @reap.command(name="top")
     async def top(self, ctx: commands.Context, count: int = 10):
         """Show top linked SteamID balances across configured delivery files."""
         if not await self._can_view_profiles(ctx):
