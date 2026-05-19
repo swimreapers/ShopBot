@@ -1,20 +1,16 @@
 {
   "author": [
-    "Swim Reapers / ChatGPT"
+    "Swim Reapers"
   ],
   "name": "SRVehicleHub",
-  "short": "Discord vehicle shop for DeliveryPlugin money and VehicleOwnershipPlugin ownership.",
+  "short": "Reap vehicle shop for DeliveryPlugin money and VehicleOwnershipPlugin ownership.",
   "description": "Redbot cog allowing users to link Steam IDs, view balances, browse vehicle_shop.json, and buy cars using delivery_points.json. Purchases write owned vehicles to one or more VehicleOwnershipPlugin owned_vehicles.json files for multi-server sync.",
-  "install_msg": "Loaded SRVehicleHub. Use [p]srhub addpoints, [p]srhub addowned, [p]srhub setshop, then [p]srhub status.",
+  "install_msg": "Loaded SRVehicleHub. Main command is [p]reap. Use [p]reap config addpoints, [p]reap config addowned, [p]reap config setshop, then [p]reap status.",
   "requirements": [],
   "tags": [
     "assetto",
-    "assettoserver",
-    "delivery",
-    "vehicles",
-    "economy",
-    "shop"
+    "Shop",
   ],
   "min_bot_version": "3.5.0",
-  "end_user_data_statement": "This cog stores Discord user ID to Steam ID links and reads/writes configured local JSON files containing Steam IDs, delivery point balances, owned vehicles, and vehicle shop data."
+  "end_user_data_statement": "This cog stores Discord user ID to Steam ID links and reads/writes configured local JSON files containing Steam IDs"
 }
